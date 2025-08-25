@@ -376,3 +376,402 @@ Please produce exactly ${count} scenes. For each scene, append a line 'seed: {SE
   </script>
 </body>
 </html>
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PromptSmith VN — GitHub Pages (UMD)</title>
+  <style>
+    :root { --bg1:#eef2ff; --bg2:#ecfeff; --border:#e2e8f0; --muted:#64748b; --ink:#0f172a; }
+    * { box-sizing:border-box } body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color:var(--ink);
+      background:linear-gradient(135deg,var(--bg1),var(--bg2)); }
+    .container { max-width:1024px; margin:0 auto; padding:24px 16px; display:grid; gap:16px; }
+    h1 { font-size:22px; font-weight:600; margin:0; }
+    .section { background:rgba(255,255,255,.8); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+    .sec-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+    .sec-head h2 { font-size:18px; font-weight:600; margin:0; }
+    label { display:block; font-size:13px; font-weight:600; color:#334155; margin:8px 0 4px; }
+    input, textarea, select { width:100%; border:1px solid #cbd5e1; border-radius:12px; padding:8px 12px; font-size:14px; outline:none; background:#fff; }
+    textarea { min-height:92px; }
+    .btn { border:1px solid #cbd5e1; background:#fff; border-radius:12px; padding:8px 12px; cursor:pointer; font-size:14px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    .muted{ color:var(--muted); font-size:13px }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace }
+    .error{ color:#b91c1c; background:#fef2f2; border:1px solid #fecaca; border-radius:12px; padding:8px; font-size:13px }
+    .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px } @media(max-width: 800px){ .grid2{ grid-template-columns:1fr } }
+    .card{ border:1px solid var(--border); border-radius:12px; padding:8px; background:rgba(255,255,255,.5); margin-bottom:8px }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React 18 UMD + Babel standalone (không cần build) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- App code (JSX) -->
+  <script type="text/babel">
+    const { useState } = React;
+
+    const Section = ({ title, children, right }) => (
+      <div className="section">
+        <div className="sec-head">
+          <h2>{title}</h2>
+          {right}
+        </div>
+        {children}
+      </div>
+    );
+
+    const Label = ({ children }) => <label>{children}</label>;
+    const Input = (props) => <input {...props} />;
+    const TextArea = (props) => <textarea {...props} />;
+    const Button = ({ children, ...props }) => <button className="btn" {...props}>{children}</button>;
+    const Select = (props) => <select {...props} />;
+
+    const emptyCharacter = () => ({
+      id: "char-" + Math.random().toString(36).slice(2, 8),
+      name: "", seed: 123, role: "", age: "", gender: "", ethnicity: "",
+      physique: "", hair: "", eyes: "", outfit: "", traits: "", backstory: "",
+    });
+
+    function buildConsistencyBlock(char) {
+      return `[[CONSISTENT_CHARACTER ${char.id}]]
+name:${char.name}
+role:${char.role}
+age:${char.age}
+gender:${char.gender}
+ethnicity:${char.ethnicity}
+physique:${char.physique}
+hair:${char.hair}
+eyes:${char.eyes}
+outfit:${char.outfit}
+traits:${char.traits}
+backstory:${char.backstory}
+[[END]]`;
+    }
+
+    function translateToEnglish(text="") {
+      const dict = { "mưa":"rain", "ban đêm":"at night", "phố":"street", "đèn neon":"neon lights", "cô gái":"girl", "chàng trai":"boy" };
+      let t = text;
+      Object.keys(dict).forEach(k => { t = t.replace(new RegExp(k,"gi"), dict[k]); });
+      return t;
+    }
+
+    const creativeIdeas = [
+      "dynamic camera pan across the scene",
+      "cinematic backlighting with dramatic shadows",
+      "slow motion effect with particles floating",
+      "close-up of character's face showing deep emotion",
+      "wide establishing shot of the environment",
+      "camera tilt for intensity and drama",
+      "lens flare and glowing neon reflections",
+      "artistic mood with surreal atmosphere",
+      "handheld camera shake for realism",
+      "panning shot revealing hidden details",
+    ];
+
+    function generateVideoPromptsLocal({ idea, duration, char, creativity }) {
+      const segLen = 9;
+      const count = Math.ceil(Math.max(1, Number(duration) || 1) / segLen);
+      const translated = translateToEnglish(idea);
+      const base = buildConsistencyBlock(char);
+      const prompts = [];
+      for (let i=0;i<count;i++){
+        let extras=[];
+        if (creativity==="low") extras=[creativeIdeas[i%creativeIdeas.length]];
+        else if (creativity==="medium") extras=[creativeIdeas[i%creativeIdeas.length], creativeIdeas[(i+3)%creativeIdeas.length]];
+        else extras=[creativeIdeas[i%creativeIdeas.length], creativeIdeas[(i+2)%creativeIdeas.length], creativeIdeas[(i+5)%creativeIdeas.length]];
+        const extraText = extras.join(", ");
+        prompts.push(
+`Scene ${i+1}: ${translated}. Creative additions: ${extraText}. Emphasize atmosphere, emotions, and environment details.
+${base}
+seed:${(Number(char.seed)||0)+i}`
+        );
+      }
+      return prompts;
+    }
+
+    function maskKey(k){ if(!k) return ""; return k.slice(0,4)+"…"+k.slice(-4); }
+
+    function classifyOpenAIError(status, raw) {
+      try {
+        const j = JSON.parse(raw);
+        const code = j?.error?.code || j?.error?.type;
+        if (status===429 || code==="insufficient_quota") return { kind:"quota", code, message:j?.error?.message };
+        if (status===401) return { kind:"auth", code, message:j?.error?.message };
+        return { kind:"other", code, message:j?.error?.message || raw };
+      } catch {
+        if (status===429) return { kind:"quota", message:raw };
+        if (status===401) return { kind:"auth", message:raw };
+        return { kind:"other", message:raw };
+      }
+    }
+
+    async function generateVideoPromptsAI({ api, idea, duration, char, creativity }) {
+      // Lưu ý: GH Pages là static; gọi OpenAI trực tiếp có thể lộ key & CORS. Khuyên dùng proxy.
+      const endpoint = api.endpoint || "https://api.openai.com/v1/responses";
+      const segLen = 9;
+      const count = Math.ceil(Math.max(1, Number(duration) || 1) / segLen);
+
+      const system =
+`You are an expert image/video prompt writer. Create a sequence of ${count} scene prompts for an image/video generator.
+Rules:
+- Keep character identity consistent using the provided [[CONSISTENT_CHARACTER ...]] block unchanged.
+- Do NOT introduce new people or IP; only elaborate creatively on the user's idea.
+- Each scene ~8-10 seconds, use varied camera, lighting, mood, action.
+- Return pure JSON with this shape: { "scenes": [ { "text": "...prompt in English..." } ] }`;
+
+      const base = buildConsistencyBlock(char);
+      const translated = translateToEnglish(idea);
+      const creativityHint = (creativity==="low")?"subtle":(creativity==="high")?"bold and rich":"balanced";
+
+      const user =
+`User idea (translated): ${translated}
+Character DNA:
+${base}
+Seed base: ${char.seed}
+Creativity level: ${creativityHint}`;
+
+      const body = {
+        model: api.model || "gpt-5-mini",
+        input: [
+          { role: "system", content: system },
+          { role: "user", content:
+            user + `
+
+Please produce exactly ${count} scenes. For each scene, append a line 'seed: {SEED}' where SEED = Seed base + sceneIndex (starting at 0). Also append the unchanged Character block at the end of each scene. Output JSON only.`
+          },
+        ],
+        text: { format: { type: "json_object" } },
+      };
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${api.key}` },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        const info = classifyOpenAIError(res.status, text);
+        throw new Error(JSON.stringify({ __openai__: true, status: res.status, ...info }));
+      }
+      const data = await res.json();
+      const raw = data.output_text || data?.output || data?.choices?.[0]?.message?.content || data?.data?.[0]?.content?.[0]?.text || "{}";
+      let parsed;
+      try { parsed = JSON.parse(raw); }
+      catch {
+        const lines = String(raw).split(/\n+/).map(s=>s.trim()).filter(Boolean);
+        return lines.map((line, i) => `${line}\n${base}\nseed:${(Number(char.seed)||0)+i}`);
+      }
+      const scenes = Array.isArray(parsed?.scenes) ? parsed.scenes : [];
+      return scenes.map((s,i)=> `${s.text}\n${base}\nseed:${(Number(char.seed)||0)+i}`);
+    }
+
+    function runTests(){
+      const tests=[]; const assert=(n,c)=>tests.push({name:n,pass:!!c});
+      const tIdea = translateToEnglish("đèn neon");
+      assert("translateToEnglish 'đèn neon' -> 'neon lights'", /neon lights/i.test(tIdea));
+      const cb = buildConsistencyBlock({ id:"char-xx", name:"Linh", role:"artist", age:"26" });
+      assert("buildConsistencyBlock markers", cb.includes("[[CONSISTENT_CHARACTER") && cb.includes("name:Linh") && cb.includes("[[END]]"));
+      const prompts3 = generateVideoPromptsLocal({ idea:"đèn neon", duration:25, char:{ id:"c1", seed:1 }, creativity:"low" });
+      assert("segment count ceil(25/9)=3", prompts3.length===3);
+      assert("seed increments", prompts3[0].includes("seed:1") && prompts3[1].includes("seed:2") && prompts3[2].includes("seed:3"));
+      const _fmt = { text: { format: { type:"json_object" } } }.text.format;
+      assert("text.format is object", typeof _fmt === "object");
+      assert("text.format.type === 'json_object'", _fmt.type === "json_object");
+      return tests;
+    }
+
+    function App(){
+      const [char, setChar] = useState(emptyCharacter());
+      const [idea, setIdea] = useState("");
+      const [duration, setDuration] = useState(30);
+      const [creativity, setCreativity] = useState("medium");
+      const [results, setResults] = useState([]);
+      const [history, setHistory] = useState([]);
+      const [characters, setCharacters] = useState([]);
+
+      const [api, setApi] = useState({ key:"", endpoint:"", model:"gpt-5-mini", useAI:false });
+      const [diag, setDiag] = useState(null);
+      const [err, setErr] = useState("");
+      const [testResults, setTestResults] = useState([]);
+
+      const addToHistory = (prompts)=>{
+        const entry = { ts:Date.now(), idea, duration, creativity, char, prompts };
+        setHistory([entry, ...history]);
+        if (!characters.find(c=>c.id===char.id)) setCharacters([char, ...characters]);
+      };
+
+      const buildLocal = ()=>{
+        setErr("");
+        const out = generateVideoPromptsLocal({ idea, duration, char, creativity });
+        setResults(out); addToHistory(out);
+      };
+
+      const buildWithAI = async ()=>{
+        setErr("");
+        try {
+          const out = await generateVideoPromptsAI({ api, idea, duration, char, creativity });
+          setResults(out); addToHistory(out);
+          setDiag({ status:200, kind:"ok", code:null });
+        } catch(e){
+          let friendly = e?.message || "";
+          try{
+            const parsed = JSON.parse(e.message);
+            if (parsed?.__openai__){
+              setDiag({ status: parsed.status, kind: parsed.kind, code: parsed.code });
+              if (parsed.kind==="quota") friendly="API key đã hết hạn mức (quota). Kiểm tra usage/billing.";
+              else if (parsed.kind==="auth") friendly="API key không hợp lệ hoặc bị từ chối (401). Kiểm tra khoá/endpoint.";
+              else friendly = parsed.message || friendly;
+            }
+          } catch {}
+          setErr(friendly || "Không gọi được OpenAI");
+        }
+      };
+
+      const clearApi = ()=>{
+        setApi({ key:"", endpoint:"", model:"gpt-5-mini", useAI:false });
+        setDiag(null); setErr("");
+      };
+
+      const loadCharacter = (id)=>{ const found = characters.find(c=>c.id===id); if(found) setChar(found); };
+
+      return (
+        <div className="container">
+          <h1>PromptSmith VN — Advanced Video Prompts</h1>
+
+          <Section
+            title="Kết nối ChatGPT (Responses API)"
+            right={
+              <div className="row">
+                <Button onClick={()=>window.open("https://platform.openai.com/account/usage","_blank")}>Kiểm tra quota</Button>
+                <Button onClick={clearApi} style={{ borderColor:"#fecaca", color:"#b91c1c" }}>Xoá cấu hình</Button>
+              </div>
+            }
+          >
+            <div className="grid2">
+              <div>
+                <Label>API key (không khuyến nghị client-side!)</Label>
+                <Input type="password" value={api.key} onChange={e=>setApi({ ...api, key:e.target.value })} placeholder="sk-..." />
+                <div className="muted" style={{ fontSize:11, marginTop:4 }}>Đang dùng: <code>{maskKey(api.key)}</code></div>
+              </div>
+              <div>
+                <Label>Endpoint (khuyên dùng: proxy an toàn)</Label>
+                <Input value={api.endpoint} onChange={e=>setApi({ ...api, endpoint:e.target.value })} placeholder="https://your-proxy.example.com/responses" />
+              </div>
+              <div>
+                <Label>Model</Label>
+                <Input value={api.model} onChange={e=>setApi({ ...api, model:e.target.value })} placeholder="gpt-5-mini" />
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:6 }}>
+                <input id="useAI" type="checkbox" checked={api.useAI} onChange={e=>setApi({ ...api, useAI:e.target.checked })} />
+                <label htmlFor="useAI" className="muted">Dùng ChatGPT để mở rộng/đánh bóng prompt (khuyên dùng qua proxy)</label>
+              </div>
+            </div>
+            {diag && (
+              <div className="muted" style={{ border:"1px solid var(--border)", borderRadius:12, padding:8, marginTop:8, fontSize:12, background:"#f8fafc" }}>
+                <div><b>Trạng thái API gần nhất</b></div>
+                <div>Status: <code>{String(diag.status)}</code> · Kind: <code>{String(diag.kind)}</code> · Code: <code>{String(diag.code)}</code></div>
+              </div>
+            )}
+          </Section>
+
+          <Section title="Nhân vật hiện tại">
+            <Label>Tên</Label>
+            <Input value={char.name} onChange={e=>setChar({ ...char, name:e.target.value })} />
+            <Label>Vai trò</Label>
+            <Input value={char.role} onChange={e=>setChar({ ...char, role:e.target.value })} />
+            <Label>Tuổi</Label>
+            <Input value={char.age} onChange={e=>setChar({ ...char, age:e.target.value })} />
+            <Label>Giới tính</Label>
+            <Input value={char.gender} onChange={e=>setChar({ ...char, gender:e.target.value })} />
+            <Label>Chủng tộc</Label>
+            <Input value={char.ethnicity} onChange={e=>setChar({ ...char, ethnicity:e.target.value })} />
+            <Label>Dáng vóc</Label>
+            <Input value={char.physique} onChange={e=>setChar({ ...char, physique:e.target.value })} />
+            <Label>Tóc</Label>
+            <Input value={char.hair} onChange={e=>setChar({ ...char, hair:e.target.value })} />
+            <Label>Mắt</Label>
+            <Input value={char.eyes} onChange={e=>setChar({ ...char, eyes:e.target.value })} />
+            <Label>Trang phục</Label>
+            <Input value={char.outfit} onChange={e=>setChar({ ...char, outfit:e.target.value })} />
+            <Label>Đặc điểm nổi bật</Label>
+            <Input value={char.traits} onChange={e=>setChar({ ...char, traits:e.target.value })} />
+            <Label>Backstory</Label>
+            <TextArea value={char.backstory} onChange={e=>setChar({ ...char, backstory:e.target.value })} />
+          </Section>
+
+          <Section title="Ý tưởng & Thời lượng">
+            <Label>Ý tưởng cảnh</Label>
+            <TextArea value={idea} onChange={e=>setIdea(e.target.value)} placeholder="Ví dụ: cô gái đứng dưới mưa trong phố ban đêm" />
+            <Label>Thời lượng video (giây)</Label>
+            <Input type="number" value={duration} onChange={e=>setDuration(Number(e.target.value))} />
+            <Label>Mức độ sáng tạo</Label>
+            <Select value={creativity} onChange={e=>setCreativity(e.target.value)}>
+              <option value="low">Ít</option>
+              <option value="medium">Vừa</option>
+              <option value="high">Nhiều</option>
+            </Select>
+          </Section>
+
+          <Section
+            title="Kết quả"
+            right={
+              <div className="row">
+                <Button onClick={()=>{ setErr(""); const out = generateVideoPromptsLocal({ idea, duration, char, creativity }); setResults(out); const entry={ ts:Date.now(), idea, duration, creativity, char, prompts:out }; setHistory((h)=>[entry, ...h]); if (!characters.find(c=>c.id===char.id)) setCharacters((cs)=>[char, ...cs]); }}>Tạo (local)</Button>
+                <Button onClick={async()=>{ try{ setErr(""); const out = await generateVideoPromptsAI({ api, idea, duration, char, creativity }); setResults(out); const entry={ ts:Date.now(), idea, duration, creativity, char, prompts:out }; setHistory((h)=>[entry, ...h]); if (!characters.find(c=>c.id===char.id)) setCharacters((cs)=>[char, ...cs]); } catch(e){ let friendly = e?.message || ""; try{ const parsed=JSON.parse(e.message); if(parsed?.__openai__){ if(parsed.kind==="quota") friendly="API key đã hết hạn mức (quota). Kiểm tra usage/billing."; else if(parsed.kind==="auth") friendly="API key không hợp lệ hoặc bị từ chối (401). Kiểm tra khoá/endpoint."; else friendly=parsed.message||friendly; } } catch{} setErr(friendly || "Không gọi được OpenAI"); } }} disabled={!api.useAI || !api.key}>Tạo bằng ChatGPT</Button>
+                <Button onClick={()=>setTestResults(runTests())}>Chạy kiểm thử</Button>
+              </div>
+            }
+          >
+            {err && <div className="error">{err}</div>}
+            <div style={{ display:"grid", gap:8 }}>
+              {results.map((r,i)=> <TextArea key={i} value={r} readOnly className="mono" />)}
+            </div>
+            {testResults.length>0 && (
+              <div style={{ marginTop:12, fontSize:12 }}>
+                <div style={{ fontWeight:600, marginBottom:4 }}>Kết quả kiểm thử</div>
+                <ul style={{ paddingLeft:16 }}>
+                  {testResults.map((t,i)=> <li key={i} style={{ color:t.pass ? "#047857":"#b91c1c" }}>{t.pass ? "PASS":"FAIL"} — {t.name}</li>)}
+                </ul>
+              </div>
+            )}
+          </Section>
+
+          <Section title="Lịch sử tạo prompt">
+            {history.length===0 && <div className="muted">Chưa có lịch sử</div>}
+            {history.map((h,idx)=> (
+              <div key={idx} className="card">
+                <div className="muted" style={{ fontSize:12, marginBottom:4 }}>
+                  {new Date(h.ts).toLocaleString()} — {h.char.name} — {h.duration}s — {h.creativity}
+                </div>
+                {h.prompts.map((p,i)=> <TextArea key={i} value={p} readOnly className="mono" style={{ marginBottom:6 }} />)}
+              </div>
+            ))}
+          </Section>
+
+          <Section title="Thư viện nhân vật đã lưu">
+            {characters.length===0 && <div className="muted">Chưa có nhân vật nào</div>}
+            {characters.map(c=> (
+              <div key={c.id} className="card" style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div>
+                  <div style={{ fontWeight:600 }}>{c.name || "(Không tên)"}</div>
+                  <div className="muted" style={{ fontSize:12 }}>{c.role} · {c.age} · {c.gender}</div>
+                </div>
+                <Button onClick={()=>{ const found = characters.find(x=>x.id===c.id); if(found) setChar(found); }}>Dùng lại</Button>
+              </div>
+            ))}
+          </Section>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
