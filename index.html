@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PromptSmith VN — No Build</title>
+  <style>
+    :root { --bg1:#eef2ff; --bg2:#ecfeff; --border:#e2e8f0; --muted:#64748b; --ink:#0f172a; }
+    * { box-sizing:border-box } body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color:var(--ink);
+      background:linear-gradient(135deg,var(--bg1),var(--bg2)); }
+    .container { max-width:1024px; margin:0 auto; padding:24px 16px; display:grid; gap:16px; }
+    h1 { font-size:22px; font-weight:600; margin:0; }
+    .section { background:rgba(255,255,255,.8); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+    .sec-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+    .sec-head h2 { font-size:18px; font-weight:600; margin:0; }
+    label { display:block; font-size:13px; font-weight:600; color:#334155; margin:8px 0 4px; }
+    input, textarea, select { width:100%; border:1px solid #cbd5e1; border-radius:12px; padding:8px 12px; font-size:14px; outline:none; background:#fff; }
+    textarea { min-height:92px; }
+    .btn { border:1px solid #cbd5e1; background:#fff; border-radius:12px; padding:8px 12px; cursor:pointer; font-size:14px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    .muted{ color:var(--muted); font-size:13px }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace }
+    .error{ color:#b91c1c; background:#fef2f2; border:1px solid #fecaca; border-radius:12px; padding:8px; font-size:13px }
+    .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px } @media(max-width: 800px){ .grid2{ grid-template-columns:1fr } }
+    .card{ border:1px solid var(--border); border-radius:12px; padding:8px; background:rgba(255,255,255,.5); margin-bottom:8px }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React từ CDN, không cần build/dev server -->
+  <script type="module">
+    import React, { useState } from "https://esm.sh/react@18.2.0";
+    import { createRoot } from "https://esm.sh/react-dom@18.2.0/client";
+
+    const Section = ({ title, children, right }) => (
+      React.createElement("div", { className:"section" },
+        React.createElement("div", { className:"sec-head" },
+          React.createElement("h2", null, title),
+          right
+        ),
+        children
+      )
+    );
+
+    const Label = ({ children }) => React.createElement("label", null, children);
+    const Input = (props) => React.createElement("input", props);
+    const TextArea = (props) => React.createElement("textarea", props);
+    const Button = ({ children, ...props }) => React.createElement("button", { className:"btn", ...props }, children);
+    const Select = (props) => React.createElement("select", props);
+
+    const emptyCharacter = () => ({
+      id: "char-" + Math.random().toString(36).slice(2, 8),
+      name: "", seed: 123, role: "", age: "", gender: "", ethnicity: "",
+      physique: "", hair: "", eyes: "", outfit: "", traits: "", backstory: "",
+    });
+
+    function buildConsistencyBlock(char) {
+      return `[[CONSISTENT_CHARACTER ${char.id}]]
+name:${char.name}
+role:${char.role}
+age:${char.age}
+gender:${char.gender}
+ethnicity:${char.ethnicity}
+physique:${char.physique}
+hair:${char.hair}
+eyes:${char.eyes}
+outfit:${char.outfit}
+traits:${char.traits}
+backstory:${char.backstory}
+[[END]]`;
+    }
+
+    function translateToEnglish(text="") {
+      const dict = { "mưa":"rain", "ban đêm":"at night", "phố":"street", "đèn neon":"neon lights", "cô gái":"girl", "chàng trai":"boy" };
+      let t = text;
+      Object.keys(dict).forEach(k => { t = t.replace(new RegExp(k,"gi"), dict[k]); });
+      return t;
+    }
+
+    const creativeIdeas = [
+      "dynamic camera pan across the scene",
+      "cinematic backlighting with dramatic shadows",
+      "slow motion effect with particles floating",
+      "close-up of character's face showing deep emotion",
+      "wide establishing shot of the environment",
+      "camera tilt for intensity and drama",
+      "lens flare and glowing neon reflections",
+      "artistic mood with surreal atmosphere",
+      "handheld camera shake for realism",
+      "panning shot revealing hidden details",
+    ];
+
+    function generateVideoPromptsLocal({ idea, duration, char, creativity }) {
+      const segLen = 9;
+      const count = Math.ceil(Math.max(1, Number(duration) || 1) / segLen);
+      const translated = translateToEnglish(idea);
+      const base = buildConsistencyBlock(char);
+      const prompts = [];
+      for (let i=0;i<count;i++){
+        let extras=[];
+        if (creativity==="low") extras=[creativeIdeas[i%creativeIdeas.length]];
+        else if (creativity==="medium") extras=[creativeIdeas[i%creativeIdeas.length], creativeIdeas[(i+3)%creativeIdeas.length]];
+        else extras=[creativeIdeas[i%creativeIdeas.length], creativeIdeas[(i+2)%creativeIdeas.length], creativeIdeas[(i+5)%creativeIdeas.length]];
+        const extraText = extras.join(", ");
+        prompts.push(
+`Scene ${i+1}: ${translated}. Creative additions: ${extraText}. Emphasize atmosphere, emotions, and environment details.
+${base}
+seed:${(Number(char.seed)||0)+i}`
+        );
+      }
+      return prompts;
+    }
+
+    function maskKey(k){ if(!k) return ""; return k.slice(0,4)+"…"+k.slice(-4); }
+
+    function classifyOpenAIError(status, raw) {
+      try {
+        const j = JSON.parse(raw);
+        const code = j?.error?.code || j?.error?.type;
+        if (status===429 || code==="insufficient_quota") return { kind:"quota", code, message:j?.error?.message };
+        if (status===401) return { kind:"auth", code, message:j?.error?.message };
+        return { kind:"other", code, message:j?.error?.message || raw };
+      } catch {
+        if (status===429) return { kind:"quota", message:raw };
+        if (status===401) return { kind:"auth", message:raw };
+        return { kind:"other", message:raw };
+      }
+    }
+
+    async function generateVideoPromptsAI({ api, idea, duration, char, creativity }) {
+      // ⚠️ GH Pages là static, gọi trực tiếp OpenAI từ browser sẽ lộ key và có thể bị CORS.
+      // => Nếu cần gọi OpenAI, hãy trỏ api.endpoint tới PROXY an toàn (xem phần B).
+      const endpoint = api.endpoint || "https://api.openai.com/v1/responses";
+      const segLen = 9;
+      const count = Math.ceil(Math.max(1, Number(duration) || 1) / segLen);
+
+      const system =
+`You are an expert image/video prompt writer. Create a sequence of ${count} scene prompts for an image/video generator.
+Rules:
+- Keep character identity consistent using the provided [[CONSISTENT_CHARACTER ...]] block unchanged.
+- Do NOT introduce new people or IP; only elaborate creatively on the user's idea.
+- Each scene ~8-10 seconds, use varied camera, lighting, mood, action.
+- Return pure JSON with this shape: { "scenes": [ { "text": "...prompt in English..." } ] }`;
+
+      const base = buildConsistencyBlock(char);
+      const translated = translateToEnglish(idea);
+      const creativityHint = (creativity==="low")?"subtle":(creativity==="high")?"bold and rich":"balanced";
+
+      const user =
+`User idea (translated): ${translated}
+Character DNA:
+${base}
+Seed base: ${char.seed}
+Creativity level: ${creativityHint}`;
+
+      const body = {
+        model: api.model || "gpt-5-mini",
+        input: [
+          { role: "system", content: system },
+          { role: "user", content:
+            user + `
+
+Please produce exactly ${count} scenes. For each scene, append a line 'seed: {SEED}' where SEED = Seed base + sceneIndex (starting at 0). Also append the unchanged Character block at the end of each scene. Output JSON only.`
+          },
+        ],
+        text: { format: { type: "json_object" } },
+      };
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${api.key}` },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        const info = classifyOpenAIError(res.status, text);
+        throw new Error(JSON.stringify({ __openai__: true, status: res.status, ...info }));
+      }
+      const data = await res.json();
+      const raw = data.output_text || data?.output || data?.choices?.[0]?.message?.content || data?.data?.[0]?.content?.[0]?.text || "{}";
+      let parsed;
+      try { parsed = JSON.parse(raw); }
+      catch {
+        const lines = String(raw).split(/\n+/).map(s=>s.trim()).filter(Boolean);
+        return lines.map((line, i) => `${line}\n${base}\nseed:${(Number(char.seed)||0)+i}`);
+      }
+      const scenes = Array.isArray(parsed?.scenes) ? parsed.scenes : [];
+      return scenes.map((s,i)=> `${s.text}\n${base}\nseed:${(Number(char.seed)||0)+i}`);
+    }
+
+    function runTests(){
+      const tests=[]; const assert=(n,c)=>tests.push({name:n,pass:!!c});
+      const tIdea = translateToEnglish("đèn neon");
+      assert("translateToEnglish 'đèn neon' -> 'neon lights'", /neon lights/i.test(tIdea));
+      const cb = buildConsistencyBlock({ id:"char-xx", name:"Linh", role:"artist", age:"26" });
+      assert("buildConsistencyBlock markers", cb.includes("[[CONSISTENT_CHARACTER") && cb.includes("name:Linh") && cb.includes("[[END]]"));
+      const prompts3 = generateVideoPromptsLocal({ idea:"đèn neon", duration:25, char:{ id:"c1", seed:1 }, creativity:"low" });
+      assert("segment count ceil(25/9)=3", prompts3.length===3);
+      assert("seed increments", prompts3[0].includes("seed:1") && prompts3[1].includes("seed:2") && prompts3[2].includes("seed:3"));
+      const _fmt = { text: { format: { type:"json_object" } } }.text.format;
+      assert("text.format is object", typeof _fmt === "object");
+      assert("text.format.type === 'json_object'", _fmt.type === "json_object");
+      return tests;
+    }
+
+    function App(){
+      const [char, setChar] = useState(emptyCharacter());
+      const [idea, setIdea] = useState("");
+      const [duration, setDuration] = useState(30);
+      const [creativity, setCreativity] = useState("medium");
+      const [results, setResults] = useState([]);
+      const [history, setHistory] = useState([]);
+      const [characters, setCharacters] = useState([]);
+
+      const [api, setApi] = useState({ key:"", endpoint:"", model:"gpt-5-mini", useAI:false });
+      const [diag, setDiag] = useState(null);
+      const [err, setErr] = useState("");
+      const [testResults, setTestResults] = useState([]);
+
+      const addToHistory = (prompts)=>{
+        const entry = { ts:Date.now(), idea, duration, creativity, char, prompts };
+        setHistory([entry, ...history]);
+        if (!characters.find(c=>c.id===char.id)) setCharacters([char, ...characters]);
+      };
+
+      const buildLocal = ()=>{
+        setErr("");
+        const out = generateVideoPromptsLocal({ idea, duration, char, creativity });
+        setResults(out); addToHistory(out);
+      };
+
+      const buildWithAI = async ()=>{
+        setErr("");
+        try {
+          const out = await generateVideoPromptsAI({ api, idea, duration, char, creativity });
+          setResults(out); addToHistory(out);
+          setDiag({ status:200, kind:"ok", code:null });
+        } catch(e){
+          let friendly = e?.message || "";
+          try{
+            const parsed = JSON.parse(e.message);
+            if (parsed?.__openai__){
+              setDiag({ status: parsed.status, kind: parsed.kind, code: parsed.code });
+              if (parsed.kind==="quota") friendly="API key đã hết hạn mức (quota). Kiểm tra usage/billing.";
+              else if (parsed.kind==="auth") friendly="API key không hợp lệ hoặc bị từ chối (401). Kiểm tra khoá/endpoint.";
+              else friendly = parsed.message || friendly;
+            }
+          } catch {}
+          setErr(friendly || "Không gọi được OpenAI");
+        }
+      };
+
+      const clearApi = ()=>{
+        setApi({ key:"", endpoint:"", model:"gpt-5-mini", useAI:false });
+        setDiag(null); setErr("");
+      };
+
+      const loadCharacter = (id)=>{ const found = characters.find(c=>c.id===id); if(found) setChar(found); };
+
+      return React.createElement("div", { className:"container" },
+        React.createElement("h1", null, "PromptSmith VN — Advanced Video Prompts"),
+
+        React.createElement(Section, {
+          title:"Kết nối ChatGPT (Responses API)",
+          right: React.createElement("div", { className:"row" },
+            React.createElement(Button, { onClick:()=>window.open("https://platform.openai.com/account/usage","_blank") }, "Kiểm tra quota"),
+            React.createElement(Button, { onClick: clearApi, style:{ borderColor:"#fecaca", color:"#b91c1c" } }, "Xoá cấu hình")
+          )
+        }, React.createElement("div", { className:"grid2" },
+            React.createElement("div", null,
+              React.createElement(Label, null, "API key (không khuyến nghị client-side!)"),
+              React.createElement(Input, { type:"password", value:api.key, onChange:e=>setApi({ ...api, key:e.target.value }), placeholder:"sk-..." }),
+              React.createElement("div", { className:"muted", style:{ fontSize:11, marginTop:4 } }, "Đang dùng: ", React.createElement("code", null, maskKey(api.key)))
+            ),
+            React.createElement("div", null,
+              React.createElement(Label, null, "Endpoint (khuyên dùng: proxy an toàn)"),
+              React.createElement(Input, { value:api.endpoint, onChange:e=>setApi({ ...api, endpoint:e.target.value }), placeholder:"https://your-proxy.example.com/responses" })
+            ),
+            React.createElement("div", null,
+              React.createElement(Label, null, "Model"),
+              React.createElement(Input, { value:api.model, onChange:e=>setApi({ ...api, model:e.target.value }), placeholder:"gpt-5-mini" })
+            ),
+            React.createElement("div", { style:{ display:"flex", alignItems:"center", gap:8, marginTop:6 } },
+              React.createElement("input", { id:"useAI", type:"checkbox", checked:api.useAI, onChange:e=>setApi({ ...api, useAI:e.target.checked }) }),
+              React.createElement("label", { htmlFor:"useAI", className:"muted" }, "Dùng ChatGPT để mở rộng/đánh bóng prompt (khuyên dùng qua proxy)")
+            )
+          ),
+          diag && React.createElement("div", { className:"muted", style:{ border:"1px solid var(--border)", borderRadius:12, padding:8, marginTop:8, fontSize:12, background:"#f8fafc" } },
+            React.createElement("div", null, React.createElement("b", null, "Trạng thái API gần nhất")),
+            React.createElement("div", null, "Status: ", React.createElement("code", null, String(diag.status)),
+              " · Kind: ", React.createElement("code", null, String(diag.kind)),
+              " · Code: ", React.createElement("code", null, String(diag.code))))
+        )),
+
+        React.createElement(Section, { title:"Nhân vật hiện tại" },
+          React.createElement(Label, null, "Tên"),
+          React.createElement(Input, { value:char.name, onChange:e=>setChar({ ...char, name:e.target.value }) }),
+          React.createElement(Label, null, "Vai trò"),
+          React.createElement(Input, { value:char.role, onChange:e=>setChar({ ...char, role:e.target.value }) }),
+          React.createElement(Label, null, "Tuổi"),
+          React.createElement(Input, { value:char.age, onChange:e=>setChar({ ...char, age:e.target.value }) }),
+          React.createElement(Label, null, "Giới tính"),
+          React.createElement(Input, { value:char.gender, onChange:e=>setChar({ ...char, gender:e.target.value }) }),
+          React.createElement(Label, null, "Chủng tộc"),
+          React.createElement(Input, { value:char.ethnicity, onChange:e=>setChar({ ...char, ethnicity:e.target.value }) }),
+          React.createElement(Label, null, "Dáng vóc"),
+          React.createElement(Input, { value:char.physique, onChange:e=>setChar({ ...char, physique:e.target.value }) }),
+          React.createElement(Label, null, "Tóc"),
+          React.createElement(Input, { value:char.hair, onChange:e=>setChar({ ...char, hair:e.target.value }) }),
+          React.createElement(Label, null, "Mắt"),
+          React.createElement(Input, { value:char.eyes, onChange:e=>setChar({ ...char, eyes:e.target.value }) }),
+          React.createElement(Label, null, "Trang phục"),
+          React.createElement(Input, { value:char.outfit, onChange:e=>setChar({ ...char, outfit:e.target.value }) }),
+          React.createElement(Label, null, "Đặc điểm nổi bật"),
+          React.createElement(Input, { value:char.traits, onChange:e=>setChar({ ...char, traits:e.target.value }) }),
+          React.createElement(Label, null, "Backstory"),
+          React.createElement(TextArea, { value:char.backstory, onChange:e=>setChar({ ...char, backstory:e.target.value }) })
+        ),
+
+        React.createElement(Section, { title:"Ý tưởng & Thời lượng" },
+          React.createElement(Label, null, "Ý tưởng cảnh"),
+          React.createElement(TextArea, { value:idea, onChange:e=>setIdea(e.target.value), placeholder:"Ví dụ: cô gái đứng dưới mưa trong phố ban đêm" }),
+          React.createElement(Label, null, "Thời lượng video (giây)"),
+          React.createElement(Input, { type:"number", value:duration, onChange:e=>setDuration(Number(e.target.value)) }),
+          React.createElement(Label, null, "Mức độ sáng tạo"),
+          React.createElement(Select, { value:creativity, onChange:e=>setCreativity(e.target.value) },
+            React.createElement("option", { value:"low" }, "Ít"),
+            React.createElement("option", { value:"medium" }, "Vừa"),
+            React.createElement("option", { value:"high" }, "Nhiều"),
+          )
+        ),
+
+        React.createElement(Section, { title:"Kết quả",
+          right: React.createElement("div", { className:"row" },
+            React.createElement(Button, { onClick:()=>{ setErr(""); const out = generateVideoPromptsLocal({ idea, duration, char, creativity }); setResults(out); const entry={ ts:Date.now(), idea, duration, creativity, char, prompts:out }; setHistory([entry, ...history]); if (!characters.find(c=>c.id===char.id)) setCharacters([char, ...characters]); } }, "Tạo (local)"),
+            React.createElement(Button, { onClick: async()=>{ try{ setErr(""); const out = await generateVideoPromptsAI({ api, idea, duration, char, creativity }); setResults(out); const entry={ ts:Date.now(), idea, duration, creativity, char, prompts:out }; setHistory([entry, ...history]); if (!characters.find(c=>c.id===char.id)) setCharacters([char, ...characters]); } catch(e){ let friendly = e?.message || ""; try{ const parsed=JSON.parse(e.message); if(parsed?.__openai__){ if(parsed.kind==="quota") friendly="API key đã hết hạn mức (quota). Kiểm tra usage/billing."; else if(parsed.kind==="auth") friendly="API key không hợp lệ hoặc bị từ chối (401). Kiểm tra khoá/endpoint."; else friendly=parsed.message||friendly; } } catch{} setErr(friendly || "Không gọi được OpenAI"); } }, disabled: !api.useAI || !api.key }, "Tạo bằng ChatGPT"),
+            React.createElement(Button, { onClick:()=>{ const t=runTests(); setTestResults(t); } }, "Chạy kiểm thử")
+          )
+        },
+          err && React.createElement("div", { className:"error" }, err),
+          React.createElement("div", { style:{ display:"grid", gap:8 } },
+            results.map((r,i)=> React.createElement(TextArea, { key:i, value:r, readOnly:true, className:"mono" }))
+          ),
+          (testResults.length>0) && React.createElement("div", { style:{ marginTop:12, fontSize:12 } },
+            React.createElement("div", { style:{ fontWeight:600, marginBottom:4 } }, "Kết quả kiểm thử"),
+            React.createElement("ul", { style:{ paddingLeft:16 } },
+              testResults.map((t,i)=> React.createElement("li", { key:i, style:{ color: t.pass ? "#047857":"#b91c1c" } }, (t.pass?"PASS":"FAIL")+" — "+t.name ))
+            )
+          )
+        ),
+
+        React.createElement(Section, { title:"Lịch sử tạo prompt" },
+          (history.length===0) && React.createElement("div", { className:"muted" }, "Chưa có lịch sử"),
+          history.map((h,idx)=> React.createElement("div", { key:idx, className:"card" },
+            React.createElement("div", { className:"muted", style:{ fontSize:12, marginBottom:4 } }, new Date(h.ts).toLocaleString(), " — ", h.char.name, " — ", h.duration,"s — ", h.creativity),
+            h.prompts.map((p,i)=> React.createElement(TextArea, { key:i, value:p, readOnly:true, className:"mono", style:{ marginBottom:6 } }))
+          ))
+        ),
+
+        React.createElement(Section, { title:"Thư viện nhân vật đã lưu" },
+          (characters.length===0) && React.createElement("div", { className:"muted" }, "Chưa có nhân vật nào"),
+          characters.map(c=> React.createElement("div", { key:c.id, className:"card", style:{ display:"flex", alignItems:"center", justifyContent:"space-between" } },
+            React.createElement("div", null,
+              React.createElement("div", { style:{ fontWeight:600 } }, c.name || "(Không tên)"),
+              React.createElement("div", { className:"muted", style:{ fontSize:12 } }, `${c.role} · ${c.age} · ${c.gender}`)
+            ),
+            React.createElement(Button, { onClick:()=>{ const found = characters.find(x=>x.id===c.id); if(found) setChar(found); } }, "Dùng lại")
+          ))
+        )
+      );
+    }
+
+    createRoot(document.getElementById("root")).render(React.createElement(App));
+  </script>
+</body>
+</html>
